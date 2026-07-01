@@ -122,11 +122,11 @@ The script prints JSON to stdout and writes artifacts under `/tmp/consult-claude
 |------|----------|
 | `result.json` | Full Claude `--output-format json` payload |
 | `response.txt` | Human-readable reply text |
-| `pre-snapshot.txt` | `git status` before consult |
-| `post-snapshot.txt` | `git status` after consult |
+| `pre-workspace.snapshot` | `git diff HEAD` + staged diff + untracked list before consult |
+| `post-workspace.snapshot` | Same snapshot after consult |
 | `files-changed.txt` | Paths that changed (should be empty) |
 
-Read `response.txt` and `files-changed.txt`. If `files-changed.txt` is non-empty, **warn the user** — Claude was supposed to be read-only.
+Read `response.txt` and `files-changed.txt`. If summary JSON has `"is_error": true`, treat as failure — do not use the response as advice. If `files-changed.txt` is non-empty, **warn the user** — Claude was supposed to be read-only.
 
 ### 6. Synthesize (Grok owns the decision)
 

@@ -96,52 +96,83 @@ RULES:
 - If context is insufficient, say what is missing instead of guessing.
 ${REASON:+Consult reason: ${REASON}}"
 
-# Snapshot workspace state (best-effort)
+# Snapshot workspace state (best-effort) — use full diff, not porcelain lines
 if git -C "$WORKSPACE" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-  git -C "$WORKSPACE" status --porcelain > "${ARTIFACT_DIR}/pre-snapshot.txt" || true
+  {
+    git -C "$WORKSPACE" diff HEAD
+    git -C "$WORKSPACE" diff --cached HEAD
+    git -C "$WORKSPACE" ls-files --others --exclude-standard
+  } > "${ARTIFACT_DIR}/pre-workspace.snapshot" 2>/dev/null || true
 else
-  : > "${ARTIFACT_DIR}/pre-snapshot.txt"
+  : > "${ARTIFACT_DIR}/pre-workspace.snapshot"
 fi
 
 COMBINED_PROMPT="${MODE_INSTRUCTION}
 
 ${PROMPT_BODY}"
 
-# Run Claude Code read-only
-if ! claude -p \
+run_with_timeout() {
+  local secs="$1"
+  shift
+  if command -v timeout >/dev/null 2>&1; then
+    timeout "$secs" "$@"
+  elif command -v gtimeout >/dev/null 2>&1; then
+    gtimeout "$secs" "$@"
+  else
+    perl -e 'alarm shift; exec @ARGV' "$secs" "$@"
+  fi
+}
+
+# Run Claude Code read-only (allow-list only — Bash can bypass Edit/Write blocks)
+TIMEOUT_SEC=$((TIMEOUT_MS / 1000))
+if ! run_with_timeout "$TIMEOUT_SEC" claude -p \
   --model "$MODEL" \
   --add-dir "$WORKSPACE" \
-  --disallowed-tools "Edit Write" \
+  --allowed-tools "Read,Grep,Glob" \
   --output-format json \
   --append-system-prompt "$SYSTEM_APPEND" \
   "$COMBINED_PROMPT" \
   > "${ARTIFACT_DIR}/result.json"
 then
-  echo "claude -p failed (mode=${MODE}, model=${MODEL})" >&2
+  EXIT=$?
+  if [[ $EXIT -eq 124 ]]; then
+    echo "claude -p timed out after ${TIMEOUT_SEC}s (mode=${MODE}, model=${MODEL})" >&2
+  else
+    echo "claude -p failed (mode=${MODE}, model=${MODEL}, exit=${EXIT})" >&2
+  fi
   exit 1
 fi
 
-# Extract human-readable response
+# Extract human-readable response; fail on API errors
 python3 - "${ARTIFACT_DIR}/result.json" "${ARTIFACT_DIR}/response.txt" <<'PY'
 import json, sys
 with open(sys.argv[1]) as f:
     data = json.load(f)
+if data.get("is_error"):
+    msg = data.get("result") or data.get("api_error_status") or "unknown Claude error"
+    print(f"Claude returned is_error: {msg}", file=sys.stderr)
+    sys.exit(1)
 text = data.get("result") or data.get("content") or json.dumps(data, indent=2)
 with open(sys.argv[2], "w") as out:
     out.write(text if isinstance(text, str) else json.dumps(text, indent=2))
 PY
 
-# Post-flight: detect unexpected file changes
+# Post-flight: detect unexpected file changes via full diff snapshot
 if git -C "$WORKSPACE" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-  git -C "$WORKSPACE" status --porcelain > "${ARTIFACT_DIR}/post-snapshot.txt" || true
-  if ! diff -q "${ARTIFACT_DIR}/pre-snapshot.txt" "${ARTIFACT_DIR}/post-snapshot.txt" >/dev/null 2>&1; then
-    comm -13 <(sort "${ARTIFACT_DIR}/pre-snapshot.txt") <(sort "${ARTIFACT_DIR}/post-snapshot.txt") \
-      > "${ARTIFACT_DIR}/files-changed.txt" || cp "${ARTIFACT_DIR}/post-snapshot.txt" "${ARTIFACT_DIR}/files-changed.txt"
+  {
+    git -C "$WORKSPACE" diff HEAD
+    git -C "$WORKSPACE" diff --cached HEAD
+    git -C "$WORKSPACE" ls-files --others --exclude-standard
+  } > "${ARTIFACT_DIR}/post-workspace.snapshot" 2>/dev/null || true
+  if ! diff -q "${ARTIFACT_DIR}/pre-workspace.snapshot" "${ARTIFACT_DIR}/post-workspace.snapshot" >/dev/null 2>&1; then
+    echo "WORKSPACE_CHANGED_DURING_CONSULT" > "${ARTIFACT_DIR}/files-changed.txt"
+    diff -u "${ARTIFACT_DIR}/pre-workspace.snapshot" "${ARTIFACT_DIR}/post-workspace.snapshot" \
+      >> "${ARTIFACT_DIR}/files-changed.txt" 2>/dev/null || true
   else
     : > "${ARTIFACT_DIR}/files-changed.txt"
   fi
 else
-  : > "${ARTIFACT_DIR}/post-snapshot.txt"
+  : > "${ARTIFACT_DIR}/post-workspace.snapshot"
   : > "${ARTIFACT_DIR}/files-changed.txt"
 fi
 
@@ -155,7 +186,8 @@ rp = art / "result.json"
 if rp.exists():
     result = json.loads(rp.read_text())
 summary = {
-    "ok": True,
+    "ok": not result.get("is_error", False),
+    "is_error": result.get("is_error", False),
     "mode": mode,
     "model_alias": model,
     "reason": reason,
