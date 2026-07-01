@@ -1,8 +1,15 @@
-# grok-build-consult-claude
+# grok-build-skills
 
-A [Grok Build](https://github.com/xai-org/grok) skill that consults **Claude Code** (`claude -p`) for read-only second opinions — plan critique, code review, or advice — only when you ask explicitly or when a strict gate passes.
+Grok Build skills for safer, more disciplined agent workflows.
 
-Grok Build stays primary. Claude advises. Grok implements.
+| Skill | Purpose |
+|-------|---------|
+| [`consult-claude`](skills/consult-claude/) | Read-only second opinions from Claude Code (`claude -p`) |
+| [`conventional-commits`](skills/conventional-commits/) | `feat:` / `fix:` / `docs:` commit messages on demand |
+
+### consult-claude
+
+Consults **Claude Code** for plan critique, code review, or advice — only when you ask explicitly or when a strict gate passes. Grok Build stays primary. Claude advises. Grok implements.
 
 ## Features
 
@@ -24,6 +31,7 @@ Grok Build stays primary. Claude advises. Grok implements.
 ```bash
 git clone https://github.com/pablonification/grok-build-consult-claude.git
 ln -sfn "$(pwd)/grok-build-consult-claude/skills/consult-claude" ~/.grok/skills/consult-claude
+ln -sfn "$(pwd)/grok-build-consult-claude/skills/conventional-commits" ~/.grok/skills/conventional-commits
 ```
 
 ### Option B — copy into a project
@@ -84,13 +92,16 @@ skills/consult-claude/scripts/consult.sh \
 ## Repository layout
 
 ```
-skills/consult-claude/
-├── SKILL.md                      # orchestrator + gating rules
-├── scripts/consult.sh            # read-only claude -p wrapper
-└── references/
-    ├── gating-rubric.md
-    └── prompts/{plan,review,advice}.md
+skills/
+├── consult-claude/                 # Claude Code second opinions
+│   ├── SKILL.md
+│   ├── scripts/consult.sh
+│   └── references/
+└── conventional-commits/           # feat:/fix:/docs: on demand (not global AGENTS.md)
+    └── SKILL.md
 ```
+
+**Why skills over global AGENTS.md?** Skills load only when committing or when you invoke them — they don't pollute every session's context.
 
 ## Contributing
 

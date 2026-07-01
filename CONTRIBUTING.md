@@ -2,7 +2,7 @@
 
 ## Commits
 
-This project uses [Conventional Commits v1.0.0](https://www.conventionalcommits.org/en/v1.0.0/).
+Invoke the `conventional-commits` skill (or `/conventional-commits`) before writing commit messages. This project follows [Conventional Commits v1.0.0](https://www.conventionalcommits.org/en/v1.0.0/).
 
 ### Format
 
